@@ -1,10 +1,32 @@
 services:
-  mqtt-broker:
-    image: eclipse-mosquitto
+  mosquitto:
+    image: eclipse-mosquitto:2
     container_name: mqtt-broker
-
     ports:
       - "1883:1883"
-
     volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - infra_net
+
+  mqtt-test-sub:
+    image: eclipse-mosquitto:2
+    container_name: mqtt-test-sub
+    command: sh -c "mosquitto_sub -h mosquitto -t infra/test -v"
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  mqtt-test-pub:
+    image: eclipse-mosquitto:2
+    container_name: mqtt-test-pub
+    command: sh -c "while true; do mosquitto_pub -h mosquitto -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+networks:
+  infra_net:
+    name: docker-monitor-infra
