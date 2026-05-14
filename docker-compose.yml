@@ -9,6 +9,15 @@ services:
     networks:
       - infra_net
 
+  heartbeat-agent:
+    build:
+      context: ./agent
+    container_name: heartbeat-agent
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
   mqtt-test-sub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-sub

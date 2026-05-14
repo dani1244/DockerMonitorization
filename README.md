@@ -7,12 +7,14 @@ Este repositorio esta na fase de infraestrutura base do projeto.
 - broker MQTT Mosquitto
 - rede docker interna dedicada
 - dois containers de teste para validar publish/subscribe
+- agente de heartbeat MQTT (Issue #4)
 
 ## Servicos no docker-compose
 
 - `mosquitto`: broker MQTT
 - `mqtt-test-pub`: publica mensagem periodica no topico `infra/test`
 - `mqtt-test-sub`: subscreve `infra/test` e imprime mensagens recebidas
+- `heartbeat-agent`: publica heartbeat periodico no topico `heartbeat/<service_id>`
 
 ## Estrutura atual
 
@@ -45,6 +47,12 @@ Nos logs de `mqtt-test-sub` devem aparecer mensagens tipo:
 `infra/test ping 2026-05-07T00:00:00Z`
 
 Isto confirma que o broker esta funcional e que o fluxo pub/sub esta valido.
+
+Para heartbeat (Issue #4), e esperado payload JSON com:
+
+- `service_id`
+- `timestamp`
+- `status: alive`
 
 ## Nota
 
