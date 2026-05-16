@@ -1,13 +1,14 @@
 import json
+import os
 import socket
 import time
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
-BROKER_HOST = "mosquitto"
-BROKER_PORT = 1883
-HEARTBEAT_INTERVAL_SECONDS = 5
+BROKER_HOST = os.getenv("BROKER_HOST", "mosquitto")
+BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
+HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL", 5))
 
 
 def build_payload(service_id: str) -> str:
