@@ -40,6 +40,30 @@ Este repositorio esta na fase de infraestrutura base do projeto.
 
    docker compose logs --tail=50 mqtt-test-sub
 
+## Configuracao
+
+O agente de heartbeat pode ser configurado com variaveis de ambiente:
+
+- `HEARTBEAT_INTERVAL`: Intervalo em segundos (default: 5)
+- `BROKER_HOST`: Host do broker MQTT (default: mosquitto)
+- `BROKER_PORT`: Porta do broker MQTT (default: 1883)
+
+### Exemplo
+
+Para alterar o intervalo de heartbeat para 10 segundos, edita o `docker-compose.yml`:
+
+```yaml
+heartbeat-agent:
+  environment:
+    - HEARTBEAT_INTERVAL=10
+```
+
+Depois rebota o servico:
+
+```bash
+docker compose up -d heartbeat-agent
+```
+
 ## Validacao esperada
 
 Nos logs de `mqtt-test-sub` devem aparecer mensagens tipo:

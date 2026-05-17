@@ -13,6 +13,10 @@ services:
     build:
       context: ./agent
     container_name: heartbeat-agent
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
     depends_on:
       - mosquitto
     networks:
