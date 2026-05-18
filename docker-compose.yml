@@ -40,6 +40,20 @@ services:
     networks:
       - infra_net
 
+  monitor:
+    build:
+      context: ./monitor
+    container_name: monitor
+    environment:
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - TIMEOUT_SECONDS=15
+      - TERM=xterm-256color
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
 networks:
   infra_net:
     name: docker-monitor-infra
