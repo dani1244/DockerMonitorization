@@ -1,93 +1,83 @@
-# Tema 3 - Infraestrutura Base (MQTT + Docker)
+# Infraestrutura Base (MQTT + Docker)
 
-Este repositorio esta na fase de infraestrutura base do projeto.
+## Descricao
+Este projeto implementa monitorizacao ativa de servicos Docker usando MQTT para telemetria de estado e disponibilidade.
 
-## O que esta incluido nesta fase
+## Componentes
+- Broker MQTT (Mosquitto)
+- Rede Docker interna dedicada
+- Containers de teste publish/subscribe
+- Agente de heartbeat por servico
+- Servico central de monitorizacao com deteccao de DOWN por timeout
 
-- broker MQTT Mosquitto
-- rede docker interna dedicada
-- dois containers de teste para validar publish/subscribe
-- agente de heartbeat MQTT (Issue #4)
-- monitor de estado MQTT com deteccao de DOWN por timeout (Issue #6)
-
-## Servicos no docker-compose
-
-- `mosquitto`: broker MQTT
-- `mqtt-test-pub`: publica mensagem periodica no topico `infra/test`
-- `mqtt-test-sub`: subscreve `infra/test` e imprime mensagens recebidas
-- `heartbeat-agent`: publica heartbeat periodico no topico `heartbeat/<service_id>`
-- `mqtt-monitor-service`: consome `heartbeat/#` e marca servicos DOWN por timeout
-
-## Estrutura atual
-
+## Estrutura do Projeto
 .
 |- docker-compose.yml
 |- mosquitto/
 |  \- mosquitto.conf
+|- agent/
+|  |- agent.py
+|  |- Dockerfile
+|  \- requirements.txt
+|- monitor/
+|  |- monitor.py
+|  |- Dockerfile
+|  \- requirements.txt
 |- .gitignore
 |- README.md
 \- Projetos_Guidelines_v2.pdf
 
-## Como executar
-
-1. Subir infraestrutura
-
-   docker compose up -d
-
-2. Confirmar estado
-
-   docker compose ps
-
-3. Ver teste de subscricao
-
-   docker compose logs --tail=50 mqtt-test-sub
+## Servicos no docker-compose
+| Servico | Descricao |
+|---------|-----------|
+| mosquitto | Broker MQTT |
+| heartbeat-agent | Publica metadata e heartbeat periodico |
+| monitor | Consome topicos monitor/+/metadata e monitor/+/heartbeat |
+| mqtt-test-pub | Publica mensagens de teste em infra/test |
+| mqtt-test-sub | Subscreve infra/test e mostra mensagens |
 
 ## Configuracao
+### Agente
+| Variavel | Descricao | Default |
+|----------|-----------|---------|
+| HEARTBEAT_INTERVAL | Intervalo entre heartbeats (s) | 5 |
+| BROKER_HOST | Host do broker MQTT | mosquitto |
+| BROKER_PORT | Porta do broker MQTT | 1883 |
+| SERVICE_PORT | Porta logica do servico monitorado | NA |
 
-O agente de heartbeat pode ser configurado com variaveis de ambiente:
+### Monitor
+| Variavel | Descricao | Default |
+|----------|-----------|---------|
+| BROKER_HOST | Host do broker MQTT | mosquitto |
+| BROKER_PORT | Porta do broker MQTT | 1883 |
+| TIMEOUT_SECONDS | Tempo sem heartbeat para marcar DOWN (s) | 15 |
+| LOG_FILE | Caminho do log do monitor | monitor.log |
 
-- `HEARTBEAT_INTERVAL`: Intervalo em segundos (default: 5)
-- `BROKER_HOST`: Host do broker MQTT (default: mosquitto)
-- `BROKER_PORT`: Porta do broker MQTT (default: 1883)
-
-O monitor pode ser configurado com variaveis de ambiente:
-
-- `DOWN_TIMEOUT`: Tempo maximo sem heartbeat antes de marcar DOWN (default: 10)
-
-### Exemplo
-
-Para alterar o intervalo de heartbeat para 10 segundos, edita o `docker-compose.yml`:
-
-```yaml
-heartbeat-agent:
-  environment:
-    - HEARTBEAT_INTERVAL=10
+## Como executar
+1. Subir infraestrutura:
+```bash
+docker compose up -d
 ```
 
-Depois rebota o servico:
-
+2. Confirmar estado:
 ```bash
-docker compose up -d heartbeat-agent
+docker compose ps
+```
+
+3. Ver monitor em tempo real:
+```bash
+docker compose logs -f monitor
+```
+
+4. Ver teste de subscricao:
+```bash
+docker compose logs --tail=50 mqtt-test-sub
 ```
 
 ## Validacao esperada
-
-Nos logs de `mqtt-test-sub` devem aparecer mensagens tipo:
-
-`infra/test ping 2026-05-07T00:00:00Z`
-
-Isto confirma que o broker esta funcional e que o fluxo pub/sub esta valido.
-
-Para heartbeat (Issue #4), e esperado payload JSON com:
-
-- `service_id`
-- `timestamp`
-- `status: alive`
-
-Para monitor (Issue #6), o estado muda para `DOWN` quando um servico
-fica sem heartbeat por mais de 10 segundos (ou valor configurado em `DOWN_TIMEOUT`).
+- mqtt-test-sub recebe mensagens em infra/test
+- monitor mostra servicos UP quando heartbeat chega
+- monitor marca servicos DOWN quando ultrapassa o timeout configurado
 
 ## Nota
-
-Esta base ja inclui os componentes centrais de heartbeat e monitoramento inicial.
-As proximas iteracoes focam em refinamento de estado, metricas e testes finais.
+Base funcional para heartbeat e monitoramento inicial. Proximas iteracoes focam em tabela de estado refinada, metricas (RTT) e testes finais.

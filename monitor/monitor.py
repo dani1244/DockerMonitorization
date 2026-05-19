@@ -1,111 +1,174 @@
 import json
+import logging
 import os
 import threading
 import time
+from datetime import datetime
 
 import paho.mqtt.client as mqtt
 
-network_state = {}
-state_lock = threading.Lock()
+BROKER_HOST = os.getenv("BROKER_HOST", "localhost")
+BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
+TIMEOUT_SECONDS = int(os.getenv("DOWN_TIMEOUT", os.getenv("TIMEOUT_SECONDS", 15)))
+LOG_FILE = os.getenv("LOG_FILE", "monitor.log")
 
-BROKER = os.getenv("BROKER_HOST", "mosquitto")
-PORT = int(os.getenv("BROKER_PORT", 1883))
-DOWN_TIMEOUT_SECONDS = int(os.getenv("DOWN_TIMEOUT", 10))
-REFRESH_INTERVAL_SECONDS = 2
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
+)
 
-# -----------------------------------
-# MQTT CONNECTION
-# -----------------------------------
+logger = logging.getLogger("monitor")
+
+services = {}
+services_lock = threading.Lock()
+
+
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def format_time(seconds):
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds/60:.0f}m"
+    return f"{seconds/3600:.1f}h"
+
+
+def print_dashboard():
+    clear_screen()
+
+    green = "\033[92m"
+    red = "\033[91m"
+    yellow = "\033[93m"
+    reset = "\033[0m"
+    bold = "\033[1m"
+
+    print(bold + "=" * 80 + reset)
+    print(bold + "DOCKER MONITOR" + reset)
+    print(bold + "=" * 80 + reset)
+
+    print(f"Atualizado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Timeout: {TIMEOUT_SECONDS}s")
+    print(f"Log: {LOG_FILE}")
+    print("-" * 80)
+
+    print(f"{'SERVICE':<20} {'IP':<16} {'PORT':<8} {'STATUS':<8} {'LAST HB':<10}")
+
+    now = time.time()
+
+    with services_lock:
+        snapshot = dict(services)
+
+    if not snapshot:
+        print("Nenhum servico ativo ainda...")
+        return
+
+    for service_id, data in snapshot.items():
+        meta = data.get("metadata", {})
+        net = meta.get("network", {})
+
+        ip = net.get("ip", "?")
+        port = net.get("port", "?")
+
+        status = data.get("status", "UNKNOWN")
+        if status == "UP":
+            status_str = green + "UP" + reset
+        elif status == "DOWN":
+            status_str = red + "DOWN" + reset
+        else:
+            status_str = yellow + status + reset
+
+        last = data.get("last_heartbeat", 0)
+        last_str = format_time(now - last) if last else "-"
+
+        print(f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} {last_str:<10}")
+
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("Connected to MQTT Broker")
+        logger.info(f"Connected to MQTT broker {BROKER_HOST}:{BROKER_PORT}")
+        client.subscribe("monitor/+/metadata")
+        client.subscribe("monitor/+/heartbeat")
     else:
-        print(f"MQTT connection failed with code {rc}")
+        logger.error(f"MQTT connection failed: {rc}")
 
-    client.subscribe("heartbeat/#")
-    client.subscribe("metadata/#")
-
-    print("Subscribed to topics")
-
-# -----------------------------------
-# RECEIVE MQTT MESSAGE
-# -----------------------------------
 
 def on_message(client, userdata, msg):
-    topic = msg.topic
-    payload = msg.payload.decode()
-
-    topic_parts = topic.split("/", 1)
-    if len(topic_parts) != 2:
+    try:
+        payload = json.loads(msg.payload.decode())
+    except json.JSONDecodeError:
+        logger.warning("Invalid JSON received")
         return
 
-    container_name = topic_parts[1]
+    parts = msg.topic.split("/")
+    if len(parts) < 2:
+        return
 
-    current_time = time.time()
+    service_id = parts[1]
+    msg_type = payload.get("type")
+
+    with services_lock:
+        if service_id not in services:
+            services[service_id] = {
+                "metadata": None,
+                "last_heartbeat": 0,
+                "status": "UNKNOWN",
+            }
+            logger.info(f"New service detected: {service_id}")
+
+        service = services[service_id]
+
+        if msg_type == "metadata":
+            service["metadata"] = payload
+            service["last_heartbeat"] = time.time()
+            service["status"] = "UP"
+        elif msg_type == "heartbeat":
+            service["last_heartbeat"] = time.time()
+            service["status"] = "UP"
+
+
+def timeout_worker():
+    while True:
+        time.sleep(2)
+
+        now = time.time()
+        with services_lock:
+            for service_id, data in services.items():
+                last = data.get("last_heartbeat", 0)
+                if last and now - last > TIMEOUT_SECONDS and data["status"] != "DOWN":
+                    data["status"] = "DOWN"
+                    logger.warning(f"Service DOWN: {service_id}")
+
+
+def main():
+    logger.info("Starting monitor...")
+
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
 
     try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        data = {"status": payload}
+        client.connect(BROKER_HOST, BROKER_PORT, 60)
+    except Exception as err:
+        logger.error(f"Connection error: {err}")
+        return
 
-    with state_lock:
-        current_entry = network_state.get(container_name, {})
-        current_entry.update(data)
-        current_entry["last_seen"] = current_time
-        current_entry["status"] = "UP"
-        network_state[container_name] = current_entry
+    threading.Thread(target=timeout_worker, daemon=True).start()
+    client.loop_start()
 
-# -----------------------------------
-# DASHBOARD
-# -----------------------------------
+    try:
+        while True:
+            print_dashboard()
+            time.sleep(2)
+    except KeyboardInterrupt:
+        logger.info("Stopping monitor...")
+    finally:
+        client.loop_stop()
+        client.disconnect()
 
-def dashboard():
-    while True:
-        os.system("clear")
 
-        print("==========================")
-        print("   NETWORK STATUS")
-        print("==========================\n")
-
-        current_time = time.time()
-
-        with state_lock:
-            for container, data in network_state.items():
-                last_seen = data.get("last_seen", 0)
-                delay = current_time - last_seen
-
-                if delay > DOWN_TIMEOUT_SECONDS:
-                    data["status"] = "DOWN"
-
-                status = data.get("status", "UNKNOWN")
-                cpu = data.get("cpu", "-")
-                print(
-                    f"{container:<20} {status:<6} CPU: {cpu:<6} "
-                    f"Last heartbeat: {delay:>5.1f}s ago"
-                )
-
-        time.sleep(REFRESH_INTERVAL_SECONDS)
-
-# -----------------------------------
-# START DASHBOARD THREAD
-# -----------------------------------
-
-dashboard_thread = threading.Thread(target=dashboard)
-
-dashboard_thread.daemon = True
-
-dashboard_thread.start()
-
-# -----------------------------------
-# START MQTT CLIENT
-# -----------------------------------
-
-client = mqtt.Client()
-
-client.on_connect = on_connect
-client.on_message = on_message
-
-client.connect(BROKER, PORT, 60)
-
-client.loop_forever()
+if __name__ == "__main__":
+    main()

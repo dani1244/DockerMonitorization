@@ -22,19 +22,6 @@ services:
     networks:
       - infra_net
 
-  mqtt-monitor-service:
-    build:
-      context: ./monitor
-    container_name: mqtt-monitor-service
-    environment:
-      - BROKER_HOST=mosquitto
-      - BROKER_PORT=1883
-      - DOWN_TIMEOUT=10
-    depends_on:
-      - mosquitto
-    networks:
-      - infra_net
-
   mqtt-test-sub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-sub
@@ -48,6 +35,20 @@ services:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-pub
     command: sh -c "while true; do mosquitto_pub -h mosquitto -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  monitor:
+    build:
+      context: ./monitor
+    container_name: monitor
+    environment:
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - TIMEOUT_SECONDS=15
+      - TERM=xterm-256color
     depends_on:
       - mosquitto
     networks:
