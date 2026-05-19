@@ -1,26 +1,22 @@
 import json
 import logging
 import os
-import time
 import threading
-import paho.mqtt.client as mqtt
+import time
 from datetime import datetime
 
+import paho.mqtt.client as mqtt
 
 BROKER_HOST = os.getenv("BROKER_HOST", "localhost")
 BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
-TIMEOUT_SECONDS = int(os.getenv("TIMEOUT_SECONDS", 15))
+TIMEOUT_SECONDS = int(os.getenv("DOWN_TIMEOUT", os.getenv("TIMEOUT_SECONDS", 15)))
 LOG_FILE = os.getenv("LOG_FILE", "monitor.log")
-
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
 )
 
 logger = logging.getLogger("monitor")
@@ -30,13 +26,13 @@ services_lock = threading.Lock()
 
 
 def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 def format_time(seconds):
     if seconds < 60:
         return f"{seconds:.0f}s"
-    elif seconds < 3600:
+    if seconds < 3600:
         return f"{seconds/60:.0f}m"
     return f"{seconds/3600:.1f}h"
 
@@ -44,15 +40,15 @@ def format_time(seconds):
 def print_dashboard():
     clear_screen()
 
-    GREEN = "\033[92m"
-    RED = "\033[91m"
-    YELLOW = "\033[93m"
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
+    green = "\033[92m"
+    red = "\033[91m"
+    yellow = "\033[93m"
+    reset = "\033[0m"
+    bold = "\033[1m"
 
-    print(BOLD + "=" * 80 + RESET)
-    print(BOLD + "DOCKER MONITOR" + RESET)
-    print(BOLD + "=" * 80 + RESET)
+    print(bold + "=" * 80 + reset)
+    print(bold + "DOCKER MONITOR" + reset)
+    print(bold + "=" * 80 + reset)
 
     print(f"Atualizado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Timeout: {TIMEOUT_SECONDS}s")
@@ -67,7 +63,7 @@ def print_dashboard():
         snapshot = dict(services)
 
     if not snapshot:
-        print("Nenhum serviço ativo ainda...")
+        print("Nenhum servico ativo ainda...")
         return
 
     for service_id, data in snapshot.items():
@@ -78,19 +74,15 @@ def print_dashboard():
         port = net.get("port", "?")
 
         status = data.get("status", "UNKNOWN")
-
         if status == "UP":
-            status_str = GREEN + "UP" + RESET
+            status_str = green + "UP" + reset
         elif status == "DOWN":
-            status_str = RED + "DOWN" + RESET
+            status_str = red + "DOWN" + reset
         else:
-            status_str = YELLOW + status + RESET
+            status_str = yellow + status + reset
 
         last = data.get("last_heartbeat", 0)
-        if last:
-            last_str = format_time(now - last)
-        else:
-            last_str = "-"
+        last_str = format_time(now - last) if last else "-"
 
         print(f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} {last_str:<10}")
 
@@ -123,7 +115,7 @@ def on_message(client, userdata, msg):
             services[service_id] = {
                 "metadata": None,
                 "last_heartbeat": 0,
-                "status": "UNKNOWN"
+                "status": "UNKNOWN",
             }
             logger.info(f"New service detected: {service_id}")
 
@@ -133,7 +125,6 @@ def on_message(client, userdata, msg):
             service["metadata"] = payload
             service["last_heartbeat"] = time.time()
             service["status"] = "UP"
-
         elif msg_type == "heartbeat":
             service["last_heartbeat"] = time.time()
             service["status"] = "UP"
@@ -144,15 +135,12 @@ def timeout_worker():
         time.sleep(2)
 
         now = time.time()
-
         with services_lock:
             for service_id, data in services.items():
                 last = data.get("last_heartbeat", 0)
-
-                if last and now - last > TIMEOUT_SECONDS:
-                    if data["status"] != "DOWN":
-                        data["status"] = "DOWN"
-                        logger.warning(f"Service DOWN: {service_id}")
+                if last and now - last > TIMEOUT_SECONDS and data["status"] != "DOWN":
+                    data["status"] = "DOWN"
+                    logger.warning(f"Service DOWN: {service_id}")
 
 
 def main():
@@ -164,8 +152,8 @@ def main():
 
     try:
         client.connect(BROKER_HOST, BROKER_PORT, 60)
-    except Exception as e:
-        logger.error(f"Connection error: {e}")
+    except Exception as err:
+        logger.error(f"Connection error: {err}")
         return
 
     threading.Thread(target=timeout_worker, daemon=True).start()
