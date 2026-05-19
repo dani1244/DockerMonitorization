@@ -25,6 +25,28 @@ services = {}
 services_lock = threading.Lock()
 
 
+def build_service_state(service_id):
+    return {
+        "service_id": service_id,
+        "status": "UNKNOWN",
+        "last_heartbeat": 0.0,
+        "last_status_change": 0.0,
+        "heartbeat_count": 0,
+        "message_count": 0,
+        "network": {
+            "ip": "?",
+            "port": "?",
+        },
+        "metadata": {},
+    }
+
+
+def set_status(service, new_status, now_ts):
+    if service.get("status") != new_status:
+        service["status"] = new_status
+        service["last_status_change"] = now_ts
+
+
 def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
@@ -67,8 +89,7 @@ def print_dashboard():
         return
 
     for service_id, data in snapshot.items():
-        meta = data.get("metadata", {})
-        net = meta.get("network", {})
+        net = data.get("network", {})
 
         ip = net.get("ip", "?")
         port = net.get("port", "?")
@@ -112,22 +133,24 @@ def on_message(client, userdata, msg):
 
     with services_lock:
         if service_id not in services:
-            services[service_id] = {
-                "metadata": None,
-                "last_heartbeat": 0,
-                "status": "UNKNOWN",
-            }
+            services[service_id] = build_service_state(service_id)
             logger.info(f"New service detected: {service_id}")
 
         service = services[service_id]
+        now_ts = time.time()
+        service["message_count"] += 1
 
         if msg_type == "metadata":
             service["metadata"] = payload
-            service["last_heartbeat"] = time.time()
-            service["status"] = "UP"
+            network = payload.get("network", {})
+            service["network"]["ip"] = network.get("ip", service["network"]["ip"])
+            service["network"]["port"] = network.get("port", service["network"]["port"])
+            service["last_heartbeat"] = now_ts
+            set_status(service, "UP", now_ts)
         elif msg_type == "heartbeat":
-            service["last_heartbeat"] = time.time()
-            service["status"] = "UP"
+            service["heartbeat_count"] += 1
+            service["last_heartbeat"] = now_ts
+            set_status(service, "UP", now_ts)
 
 
 def timeout_worker():
@@ -139,7 +162,7 @@ def timeout_worker():
             for service_id, data in services.items():
                 last = data.get("last_heartbeat", 0)
                 if last and now - last > TIMEOUT_SECONDS and data["status"] != "DOWN":
-                    data["status"] = "DOWN"
+                    set_status(data, "DOWN", now)
                     logger.warning(f"Service DOWN: {service_id}")
 
 
