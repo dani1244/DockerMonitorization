@@ -22,6 +22,19 @@ services:
     networks:
       - infra_net
 
+  mqtt-monitor-service:
+    build:
+      context: ./monitor
+    container_name: mqtt-monitor-service
+    environment:
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - DOWN_TIMEOUT=10
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
   mqtt-test-sub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-sub

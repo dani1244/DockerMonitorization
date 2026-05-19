@@ -8,6 +8,7 @@ Este repositorio esta na fase de infraestrutura base do projeto.
 - rede docker interna dedicada
 - dois containers de teste para validar publish/subscribe
 - agente de heartbeat MQTT (Issue #4)
+- monitor de estado MQTT com deteccao de DOWN por timeout (Issue #6)
 
 ## Servicos no docker-compose
 
@@ -15,6 +16,7 @@ Este repositorio esta na fase de infraestrutura base do projeto.
 - `mqtt-test-pub`: publica mensagem periodica no topico `infra/test`
 - `mqtt-test-sub`: subscreve `infra/test` e imprime mensagens recebidas
 - `heartbeat-agent`: publica heartbeat periodico no topico `heartbeat/<service_id>`
+- `mqtt-monitor-service`: consome `heartbeat/#` e marca servicos DOWN por timeout
 
 ## Estrutura atual
 
@@ -48,6 +50,10 @@ O agente de heartbeat pode ser configurado com variaveis de ambiente:
 - `BROKER_HOST`: Host do broker MQTT (default: mosquitto)
 - `BROKER_PORT`: Porta do broker MQTT (default: 1883)
 
+O monitor pode ser configurado com variaveis de ambiente:
+
+- `DOWN_TIMEOUT`: Tempo maximo sem heartbeat antes de marcar DOWN (default: 10)
+
 ### Exemplo
 
 Para alterar o intervalo de heartbeat para 10 segundos, edita o `docker-compose.yml`:
@@ -78,6 +84,10 @@ Para heartbeat (Issue #4), e esperado payload JSON com:
 - `timestamp`
 - `status: alive`
 
+Para monitor (Issue #6), o estado muda para `DOWN` quando um servico
+fica sem heartbeat por mais de 10 segundos (ou valor configurado em `DOWN_TIMEOUT`).
+
 ## Nota
 
-O codigo CORE (agente heartbeat e monitor central) foi removido de proposito para manter apenas o setup base nesta etapa.
+Esta base ja inclui os componentes centrais de heartbeat e monitoramento inicial.
+As proximas iteracoes focam em refinamento de estado, metricas e testes finais.
