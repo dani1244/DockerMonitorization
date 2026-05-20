@@ -45,6 +45,7 @@ def set_status(service, new_status, now_ts):
     if service.get("status") != new_status:
         service["status"] = new_status
         service["last_status_change"] = now_ts
+        logger.info(f"Service {service['service_id']} changed to {new_status}")
 
 
 def clear_screen():
@@ -57,6 +58,12 @@ def format_time(seconds):
     if seconds < 3600:
         return f"{seconds/60:.0f}m"
     return f"{seconds/3600:.1f}h"
+
+
+def format_timestamp(timestamp):
+    if not timestamp:
+        return "-"
+    return datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
 
 
 def print_dashboard():
@@ -77,7 +84,10 @@ def print_dashboard():
     print(f"Log: {LOG_FILE}")
     print("-" * 80)
 
-    print(f"{'SERVICE':<20} {'IP':<16} {'PORT':<8} {'STATUS':<8} {'LAST HB':<10}")
+    print(
+        f"{'SERVICE':<20} {'IP':<16} {'PORT':<8} {'STATUS':<8} "
+        f"{'LAST HB':<10} {'LAST CHG':<10}"
+    )
 
     now = time.time()
 
@@ -104,8 +114,12 @@ def print_dashboard():
 
         last = data.get("last_heartbeat", 0)
         last_str = format_time(now - last) if last else "-"
+        last_change = format_timestamp(data.get("last_status_change", 0))
 
-        print(f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} {last_str:<10}")
+        print(
+            f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} "
+            f"{last_str:<10} {last_change:<10}"
+        )
 
 
 def on_connect(client, userdata, flags, rc):
