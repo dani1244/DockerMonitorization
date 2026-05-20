@@ -33,6 +33,7 @@ def build_service_state(service_id):
         "last_status_change": 0.0,
         "heartbeat_count": 0,
         "message_count": 0,
+        "rtt_ms": None,
         "network": {
             "ip": "?",
             "port": "?",
@@ -86,7 +87,7 @@ def print_dashboard():
 
     print(
         f"{'SERVICE':<20} {'IP':<16} {'PORT':<8} {'STATUS':<8} "
-        f"{'LAST HB':<10} {'LAST CHG':<10}"
+        f"{'LAST HB':<10} {'LAST CHG':<10} {'RTT':<10}"
     )
 
     now = time.time()
@@ -115,10 +116,12 @@ def print_dashboard():
         last = data.get("last_heartbeat", 0)
         last_str = format_time(now - last) if last else "-"
         last_change = format_timestamp(data.get("last_status_change", 0))
+        rtt = data.get("rtt_ms")
+        rtt_str = f"{rtt}ms" if rtt is not None else "-"
 
         print(
             f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} "
-            f"{last_str:<10} {last_change:<10}"
+            f"{last_str:<10} {last_change:<10} {rtt_str:<10}"
         )
 
 
@@ -165,6 +168,19 @@ def on_message(client, userdata, msg):
             service["heartbeat_count"] += 1
             service["last_heartbeat"] = now_ts
             set_status(service, "UP", now_ts)
+            sent_ts_str = payload.get("timestamp")
+            if sent_ts_str:
+                try:
+                    from datetime import timezone
+                    sent_dt = datetime.fromisoformat(sent_ts_str)
+                    if sent_dt.tzinfo is None:
+                        sent_dt = sent_dt.replace(tzinfo=timezone.utc)
+                    sent_epoch = sent_dt.timestamp()
+                    rtt = (now_ts - sent_epoch) * 1000
+                    if 0 <= rtt < 60000:
+                        service["rtt_ms"] = round(rtt, 2)
+                except (ValueError, TypeError):
+                    pass
 
 
 def timeout_worker():
