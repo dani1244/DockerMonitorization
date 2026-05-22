@@ -89,3 +89,4 @@ E o heartbeat-agent(Issue #4) publica mensagens no tópico heartbeat/<service_id
 O codigo CORE (agente heartbeat e monitor central) foi removido de proposito para manter apenas o setup base nesta etapa.
 
 
+
