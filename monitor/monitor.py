@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import uuid
 import threading
 import time
 from datetime import datetime
@@ -10,6 +11,9 @@ import paho.mqtt.client as mqtt
 BROKER_HOST = os.getenv("BROKER_HOST", "localhost")
 BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
 TIMEOUT_SECONDS = int(os.getenv("DOWN_TIMEOUT", os.getenv("TIMEOUT_SECONDS", 15)))
+MAX_MISSED_CHECKS = int(os.getenv("MAX_MISSED_CHECKS", 2))
+PING_INTERVAL_SECONDS = float(os.getenv("PING_INTERVAL_SECONDS", 5.0))
+PING_RESPONSE_TIMEOUT = float(os.getenv("PING_RESPONSE_TIMEOUT", 2.0))
 LOG_FILE = os.getenv("LOG_FILE", "monitor.log")
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
@@ -35,6 +39,10 @@ def build_service_state(service_id):
         "last_status_change": 0.0,
         "heartbeat_count": 0,
         "message_count": 0,
+        "missed_checks": 0,
+        "last_ping_id": None,
+        "ping_sent_at": 0.0,
+        "pending_ping": False,
         "rtt_ms": None,
         "network": {
             "ip": "?",
@@ -89,7 +97,7 @@ def print_dashboard():
 
     print(
         f"{'SERVICE':<20} {'IP':<16} {'PORT':<8} {'STATUS':<8} "
-        f"{'LAST HB':<10} {'LAST CHG':<10} {'RTT':<10}"
+        f"{'LAST HB':<10} {'LAST CHG':<10} {'RTT':<10} {'PING':<8}"
     )
 
     now = time.time()
@@ -120,10 +128,11 @@ def print_dashboard():
         last_change = format_timestamp(data.get("last_status_change", 0))
         rtt = data.get("rtt_ms")
         rtt_str = f"{rtt}ms" if rtt is not None else "-"
+        ping_status = "WAIT" if data.get("pending_ping") else "-"
 
         print(
             f"{service_id:<20} {ip:<16} {port:<8} {status_str:<8} "
-            f"{last_str:<10} {last_change:<10} {rtt_str:<10}"
+            f"{last_str:<10} {last_change:<10} {rtt_str:<10} {ping_status:<8}"
         )
 
 
@@ -165,24 +174,25 @@ def on_message(client, userdata, msg):
             service["network"]["ip"] = network.get("ip", service["network"]["ip"])
             service["network"]["port"] = network.get("port", service["network"]["port"])
             service["last_heartbeat"] = now_ts
+            service["missed_checks"] = 0
             set_status(service, "UP", now_ts)
         elif msg_type == "heartbeat":
             service["heartbeat_count"] += 1
             service["last_heartbeat"] = now_ts
+            service["missed_checks"] = 0
             set_status(service, "UP", now_ts)
-            sent_ts_str = payload.get("timestamp")
-            if sent_ts_str:
+        elif msg_type == "pong":
+            ping_id = payload.get("ping_id")
+            sent_at = payload.get("sent_at")
+            if ping_id and sent_at is not None and ping_id == service.get("last_ping_id"):
                 try:
-                    from datetime import timezone
-                    sent_dt = datetime.fromisoformat(sent_ts_str)
-                    if sent_dt.tzinfo is None:
-                        sent_dt = sent_dt.replace(tzinfo=timezone.utc)
-                    sent_epoch = sent_dt.timestamp()
-                    rtt = (now_ts - sent_epoch) * 1000
+                    rtt = (now_ts - float(sent_at)) * 1000
                     if 0 <= rtt < 60000:
                         service["rtt_ms"] = round(rtt, 2)
-                except (ValueError, TypeError):
-                    pass
+                        service["pending_ping"] = False
+                        logger.info(f"RTT for {service_id}: {service['rtt_ms']} ms")
+                except (TypeError, ValueError):
+                    logger.warning(f"Invalid RTT pong payload from {service_id}")
 
 
 def timeout_worker():
@@ -193,9 +203,58 @@ def timeout_worker():
         with services_lock:
             for service_id, data in services.items():
                 last = data.get("last_heartbeat", 0)
-                if last and now - last > TIMEOUT_SECONDS and data["status"] != "DOWN":
-                    set_status(data, "DOWN", now)
-                    logger.warning(f"Service DOWN: {service_id}")
+                if not last:
+                    continue
+
+                elapsed = now - last
+                if elapsed > TIMEOUT_SECONDS:
+                    data["missed_checks"] = data.get("missed_checks", 0) + 1
+                    if data["missed_checks"] >= MAX_MISSED_CHECKS and data["status"] != "DOWN":
+                        set_status(data, "DOWN", now)
+                        logger.warning(
+                            f"Service DOWN: {service_id} "
+                            f"(missed_checks={data['missed_checks']}, elapsed={elapsed:.1f}s)"
+                        )
+
+
+def ping_worker(client):
+    while True:
+        time.sleep(PING_INTERVAL_SECONDS)
+
+        now = time.time()
+
+        with services_lock:
+            for service_id, data in services.items():
+                ping_sent_at = data.get("ping_sent_at", 0.0)
+                if data.get("pending_ping") and ping_sent_at and now - ping_sent_at > PING_RESPONSE_TIMEOUT:
+                    data["pending_ping"] = False
+                    logger.warning(f"Ping timeout for {service_id}; allowing new RTT probe")
+
+            targets = [
+                (service_id, data)
+                for service_id, data in services.items()
+                if data.get("status") == "UP" and not data.get("pending_ping")
+            ]
+
+            for service_id, data in targets:
+                ping_id = uuid.uuid4().hex
+                sent_at = time.time()
+                ping_topic = f"monitor/{service_id}/ping"
+                ping_payload = {
+                    "type": "ping",
+                    "service_id": service_id,
+                    "ping_id": ping_id,
+                    "sent_at": sent_at,
+                }
+
+                result = client.publish(ping_topic, json.dumps(ping_payload), qos=1)
+                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                    data["last_ping_id"] = ping_id
+                    data["ping_sent_at"] = sent_at
+                    data["pending_ping"] = True
+                    logger.info(f"Ping enviado para {service_id} | ping_id={ping_id}")
+                else:
+                    logger.warning(f"Falha ao publicar ping para {service_id}")
 
 
 def main():
@@ -214,6 +273,7 @@ def main():
         return
 
     threading.Thread(target=timeout_worker, daemon=True).start()
+    threading.Thread(target=ping_worker, args=(client,), daemon=True).start()
     client.loop_start()
 
     try:
