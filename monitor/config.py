@@ -12,5 +12,6 @@ class Settings:
     ping_response_timeout: float = float(os.getenv("PING_RESPONSE_TIMEOUT", 2.0))
     dashboard_refresh_seconds: float = float(os.getenv("DASHBOARD_REFRESH_SECONDS", 2.0))
     log_file: str = os.getenv("LOG_FILE", "monitor.log")
+    db_path: str = os.getenv("MONITOR_DB_PATH", "monitor_data.db")
     mqtt_username: str = os.getenv("MQTT_USERNAME", "")
     mqtt_password: str = os.getenv("MQTT_PASSWORD", "")

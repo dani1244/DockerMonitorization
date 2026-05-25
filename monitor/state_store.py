@@ -87,6 +87,13 @@ class StateStore:
         with self._lock:
             return deepcopy(self._services)
 
+    def get_service_copy(self, service_id: str) -> Optional[dict]:
+        with self._lock:
+            data = self._services.get(service_id)
+            if data is None:
+                return None
+            return deepcopy(data)
+
     def get_ping_targets(self) -> List[str]:
         with self._lock:
             return [

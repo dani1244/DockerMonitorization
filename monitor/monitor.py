@@ -6,6 +6,7 @@ from queue import Queue
 from config import Settings
 from dashboard import render_dashboard
 from mqtt_receiver import build_mqtt_client
+from sqlite_store import SQLiteStore
 from state_store import StateStore
 from workers import start_ingest_worker, start_ping_worker, start_timeout_worker
 
@@ -25,6 +26,7 @@ def main():
     stop_event = threading.Event()
     ingest_queue: Queue = Queue(maxsize=10000)
     store = StateStore()
+    db = SQLiteStore(settings.db_path)
 
     client = build_mqtt_client(settings, ingest_queue, logger)
 
@@ -34,9 +36,9 @@ def main():
         logger.exception(f"Connection error: {err}")
         return
 
-    start_ingest_worker(ingest_queue, store, logger, stop_event)
-    start_timeout_worker(store, settings, logger, stop_event)
-    start_ping_worker(client, store, settings, logger, stop_event)
+    start_ingest_worker(ingest_queue, store, logger, stop_event, db=db)
+    start_timeout_worker(store, settings, logger, stop_event, db=db)
+    start_ping_worker(client, store, settings, logger, stop_event, db=db)
 
     client.loop_start()
 
@@ -50,6 +52,7 @@ def main():
         stop_event.set()
         client.loop_stop()
         client.disconnect()
+        db.close()
 
 
 if __name__ == "__main__":
