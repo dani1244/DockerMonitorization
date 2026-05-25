@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 BROKER_HOST = os.getenv("BROKER_HOST", "mosquitto")
 BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
 HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", 5))
+PING_TIMEOUT = float(os.getenv("PING_TIMEOUT", 2.0))
 SERVICE_PORT = os.getenv("SERVICE_PORT", "NA")
 
 
@@ -69,9 +70,22 @@ def build_heartbeat(service_id):
     }
 
 
+def build_pong(service_id, ping_id, sent_at):
+    return {
+        "type": "pong",
+        "service_id": service_id,
+        "ping_id": ping_id,
+        "sent_at": sent_at,
+        "timestamp": current_timestamp(),
+    }
+
+
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         logger.info("Ligação ao broker MQTT estabelecida")
+        service_id = userdata.get("service_id") if isinstance(userdata, dict) else None
+        if service_id:
+            client.subscribe(f"monitor/{service_id}/ping")
     else:
         logger.error(f"Falha na ligação MQTT (rc={rc})")
 
@@ -81,11 +95,45 @@ def on_disconnect(client, userdata, rc):
         logger.warning("Ligação MQTT perdida. A tentar reconectar...")
 
 
+def on_message(client, userdata, msg):
+    try:
+        payload = json.loads(msg.payload.decode())
+    except json.JSONDecodeError:
+        logger.warning("Mensagem MQTT inválida recebida")
+        return
+
+    if payload.get("type") != "ping":
+        return
+
+    service_id = payload.get("service_id")
+    ping_id = payload.get("ping_id")
+    sent_at = payload.get("sent_at")
+    if not service_id or not ping_id or sent_at is None:
+        logger.warning("Ping MQTT sem campos obrigatórios")
+        return
+
+    pong_topic = f"monitor/{service_id}/pong"
+    pong = build_pong(service_id, ping_id, sent_at)
+
+    result = client.publish(
+        pong_topic,
+        json.dumps(pong),
+        qos=1
+    )
+
+    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+        logger.info(f"Pong enviado: {service_id} | ping_id={ping_id}")
+    else:
+        logger.warning(f"Falha ao enviar pong para {service_id}")
+
+
 def connect_mqtt(service_id):
     client = mqtt.Client(client_id=f"agent-{service_id}")
+    client.user_data_set({"service_id": service_id})
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
+    client.on_message = on_message
 
     client.reconnect_delay_set(min_delay=1, max_delay=10)
 
