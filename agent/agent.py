@@ -11,6 +11,8 @@ BROKER_HOST = os.getenv("BROKER_HOST", "mosquitto")
 BROKER_PORT = int(os.getenv("BROKER_PORT", 1883))
 HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", 5))
 SERVICE_PORT = os.getenv("SERVICE_PORT", "NA")
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 
 logging.basicConfig(
@@ -83,6 +85,9 @@ def on_disconnect(client, userdata, rc):
 
 def connect_mqtt(service_id):
     client = mqtt.Client(client_id=f"agent-{service_id}")
+
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect

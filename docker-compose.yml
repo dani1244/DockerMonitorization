@@ -6,6 +6,7 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
     networks:
       - infra_net
 
@@ -17,6 +18,8 @@ services:
       - HEARTBEAT_INTERVAL=5
       - BROKER_HOST=mosquitto
       - BROKER_PORT=1883
+      - MQTT_USERNAME=monitor
+      - MQTT_PASSWORD=monitor123
     depends_on:
       - mosquitto
     networks:
@@ -25,7 +28,7 @@ services:
   mqtt-test-sub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-sub
-    command: sh -c "mosquitto_sub -h mosquitto -t infra/test -v"
+    command: sh -c "mosquitto_sub -h mosquitto -u monitor -P monitor123 -t infra/test -v"
     depends_on:
       - mosquitto
     networks:
@@ -34,7 +37,7 @@ services:
   mqtt-test-pub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-pub
-    command: sh -c "while true; do mosquitto_pub -h mosquitto -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
+    command: sh -c "while true; do mosquitto_pub -h mosquitto -u monitor -P monitor123 -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
     depends_on:
       - mosquitto
     networks:
@@ -48,6 +51,8 @@ services:
       - BROKER_HOST=mosquitto
       - BROKER_PORT=1883
       - TIMEOUT_SECONDS=15
+      - MQTT_USERNAME=monitor
+      - MQTT_PASSWORD=monitor123
       - TERM=xterm-256color
     depends_on:
       - mosquitto
