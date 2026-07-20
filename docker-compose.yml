@@ -2,24 +2,162 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mqtt-broker
+    restart: unless-stopped
     ports:
       - "1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+    networks:
+      - infra_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-realtime
+    restart: unless-stopped
     networks:
       - infra_net
 
   heartbeat-agent:
     build:
       context: ./agent
-    container_name: heartbeat-agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - DOMAIN_EVENT_INTERVAL=12
+      - ROOM_CLASS_ENDED_PROBABILITY=0.45
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=deti-room-service
+      - SERVICE_MODULE=rooms
+      - SERVICE_TYPE=rooms
+      - SERVICE_DEPARTMENT=DETI
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  deti-printer-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
     environment:
       - HEARTBEAT_INTERVAL=5
       - BROKER_HOST=mosquitto
       - BROKER_PORT=1883
-      - MQTT_USERNAME=monitor
-      - MQTT_PASSWORD=monitor123
+      - SERVICE_ID=deti-printer-service
+      - SERVICE_MODULE=printers
+      - SERVICE_TYPE=printers
+      - SERVICE_DEPARTMENT=DETI
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  deti-parking-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - DOMAIN_EVENT_INTERVAL=12
+      - PARKING_FULL_THRESHOLD=12
+      - PARKING_RECOVERED_THRESHOLD=20
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=deti-parking-service
+      - SERVICE_MODULE=parking
+      - SERVICE_TYPE=parking
+      - SERVICE_DEPARTMENT=DETI
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  biblioteca-library-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=biblioteca-library-service
+      - SERVICE_MODULE=library
+      - SERVICE_TYPE=library
+      - SERVICE_DEPARTMENT=Biblioteca Central
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  biblioteca-parking-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - DOMAIN_EVENT_INTERVAL=12
+      - PARKING_FULL_THRESHOLD=10
+      - PARKING_RECOVERED_THRESHOLD=18
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=biblioteca-parking-service
+      - SERVICE_MODULE=parking
+      - SERVICE_TYPE=parking
+      - SERVICE_DEPARTMENT=Biblioteca Central
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  cantina-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=cantina-service
+      - SERVICE_MODULE=canteen
+      - SERVICE_TYPE=canteen
+      - SERVICE_DEPARTMENT=Cantina Central
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  transport-shuttle-1-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - DOMAIN_EVENT_INTERVAL=10
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=transport-shuttle-1
+      - SERVICE_MODULE=transport
+      - SERVICE_TYPE=transport
+      - SERVICE_DEPARTMENT=Transportes
+    depends_on:
+      - mosquitto
+    networks:
+      - infra_net
+
+  transport-shuttle-2-agent:
+    build:
+      context: ./agent
+    restart: unless-stopped
+    environment:
+      - HEARTBEAT_INTERVAL=5
+      - DOMAIN_EVENT_INTERVAL=10
+      - BROKER_HOST=mosquitto
+      - BROKER_PORT=1883
+      - SERVICE_ID=transport-shuttle-2
+      - SERVICE_MODULE=transport
+      - SERVICE_TYPE=transport
+      - SERVICE_DEPARTMENT=Transportes
     depends_on:
       - mosquitto
     networks:
@@ -28,7 +166,7 @@ services:
   mqtt-test-sub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-sub
-    command: sh -c "mosquitto_sub -h mosquitto -u monitor -P monitor123 -t infra/test -v"
+    command: sh -c "mosquitto_sub -h mosquitto -t infra/test -v"
     depends_on:
       - mosquitto
     networks:
@@ -37,7 +175,7 @@ services:
   mqtt-test-pub:
     image: eclipse-mosquitto:2
     container_name: mqtt-test-pub
-    command: sh -c "while true; do mosquitto_pub -h mosquitto -u monitor -P monitor123 -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
+    command: sh -c "while true; do mosquitto_pub -h mosquitto -t infra/test -m \"ping $$(date -u +%FT%TZ)\"; sleep 10; done"
     depends_on:
       - mosquitto
     networks:
@@ -47,15 +185,24 @@ services:
     build:
       context: ./monitor
     container_name: monitor
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
     environment:
       - BROKER_HOST=mosquitto
       - BROKER_PORT=1883
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DASHBOARD_MODULE_FILTER=ALL
+      - ALERT_COOLDOWN_SECONDS=30
       - TIMEOUT_SECONDS=15
-      - MQTT_USERNAME=monitor
-      - MQTT_PASSWORD=monitor123
+      - WEB_DASHBOARD_HOST=0.0.0.0
+      - WEB_DASHBOARD_PORT=5000
+      - TERMINAL_DASHBOARD_ENABLED=true
       - TERM=xterm-256color
     depends_on:
       - mosquitto
+      - redis
     networks:
       - infra_net
 

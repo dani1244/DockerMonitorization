@@ -14,9 +14,13 @@ def build_mqtt_client(settings, ingest_queue: Queue, logger):
     def on_connect(mqtt_client, userdata, flags, rc):
         if rc == 0:
             logger.info(f"Connected to MQTT broker {settings.broker_host}:{settings.broker_port}")
+            mqtt_client.subscribe("monitor/+/register")
+            mqtt_client.subscribe("monitor/+/unregister")
             mqtt_client.subscribe("monitor/+/metadata")
             mqtt_client.subscribe("monitor/+/heartbeat")
+            mqtt_client.subscribe("monitor/+/status")
             mqtt_client.subscribe("monitor/+/pong")
+            mqtt_client.subscribe("campus/domain/#")
         else:
             logger.error(f"MQTT connection failed: {rc}")
 

@@ -8,13 +8,17 @@ from message_processor import process_event
 from state_store import StateStore
 
 
-def _persist_ping_timeout(service_id: str, now_ts: float, store: StateStore, db) -> None:
+def _persist_ping_timeout(service_id: str, now_ts: float, store: StateStore, db, realtime_store=None) -> None:
     if db is None:
-        return
-    db.record_event(service_id, "ping_timeout", now_ts, None)
+        if realtime_store is None:
+            return
+    if db is not None:
+        db.record_event(service_id, "ping_timeout", now_ts, None)
     state = store.get_service_copy(service_id)
-    if state is not None:
+    if state is not None and db is not None:
         db.upsert_service(state, now_ts)
+    if state is not None and realtime_store is not None:
+        realtime_store.upsert_service_realtime(state, now_ts)
 
 
 def _publish_ping_for_service(client, service_id: str, store: StateStore, logger) -> None:
@@ -36,7 +40,7 @@ def _publish_ping_for_service(client, service_id: str, store: StateStore, logger
         logger.warning(f"Falha ao publicar ping para {service_id}")
 
 
-def start_ingest_worker(ingest_queue: Queue, store: StateStore, logger, stop_event: threading.Event, db=None) -> threading.Thread:
+def start_ingest_worker(ingest_queue: Queue, store: StateStore, logger, stop_event: threading.Event, db=None, realtime_store=None) -> threading.Thread:
     def _run():
         while not stop_event.is_set():
             try:
@@ -45,7 +49,7 @@ def start_ingest_worker(ingest_queue: Queue, store: StateStore, logger, stop_eve
                 continue
 
             try:
-                process_event(event, store, logger, db)
+                process_event(event, store, logger, db, realtime_store)
             finally:
                 ingest_queue.task_done()
 
@@ -54,7 +58,7 @@ def start_ingest_worker(ingest_queue: Queue, store: StateStore, logger, stop_eve
     return thread
 
 
-def start_timeout_worker(store: StateStore, settings, logger, stop_event: threading.Event, db=None) -> threading.Thread:
+def start_timeout_worker(store: StateStore, settings, logger, stop_event: threading.Event, db=None, realtime_store=None) -> threading.Thread:
     def _run():
         while not stop_event.is_set():
             time.sleep(2)
@@ -78,13 +82,18 @@ def start_timeout_worker(store: StateStore, settings, logger, stop_event: thread
                     state = store.get_service_copy(item["service_id"])
                     if state is not None:
                         db.upsert_service(state, now_ts)
+                else:
+                    state = store.get_service_copy(item["service_id"])
+
+                if realtime_store is not None and state is not None:
+                    realtime_store.upsert_service_realtime(state, now_ts)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     return thread
 
 
-def start_ping_worker(client, store: StateStore, settings, logger, stop_event: threading.Event, db=None) -> threading.Thread:
+def start_ping_worker(client, store: StateStore, settings, logger, stop_event: threading.Event, db=None, realtime_store=None) -> threading.Thread:
     def _run():
         while not stop_event.is_set():
             time.sleep(settings.ping_interval_seconds)
@@ -93,7 +102,7 @@ def start_ping_worker(client, store: StateStore, settings, logger, stop_event: t
             expired = store.expire_pending_pings(now_ts, settings.ping_response_timeout)
             for service_id in expired:
                 logger.warning(f"Ping timeout for {service_id}; allowing new RTT probe")
-                _persist_ping_timeout(service_id, now_ts, store, db)
+                _persist_ping_timeout(service_id, now_ts, store, db, realtime_store)
 
             for service_id in store.get_ping_targets():
                 _publish_ping_for_service(client, service_id, store, logger)

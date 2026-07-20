@@ -12,6 +12,13 @@ class StateStore:
         return {
             "service_id": service_id,
             "status": "UNKNOWN",
+            "module": "unknown",
+            "department": "unknown",
+            "service_type": "unknown",
+            "version": "unknown",
+            "registered": False,
+            "registered_at": 0.0,
+            "last_unregister": 0.0,
             "last_heartbeat": 0.0,
             "last_status_change": 0.0,
             "heartbeat_count": 0,
@@ -26,6 +33,7 @@ class StateStore:
                 "port": "?",
             },
             "metadata": {},
+            "service_status": {},
         }
 
     def _ensure_service(self, service_id: str) -> dict:
@@ -56,8 +64,52 @@ class StateStore:
             network = payload.get("network", {})
             service["network"]["ip"] = network.get("ip", service["network"]["ip"])
             service["network"]["port"] = network.get("port", service["network"]["port"])
+            payload_type = payload.get("service_type")
+            if payload_type:
+                service["service_type"] = payload_type
+
+            payload_module = payload.get("module")
+            if payload_module:
+                service["module"] = payload_module
+
+            service["department"] = payload.get("department", service["department"])
+            service["version"] = payload.get("version", service["version"])
             service["last_heartbeat"] = now_ts
             service["missed_checks"] = 0
+
+    def apply_register(self, service_id: str, payload: dict, now_ts: float) -> None:
+        with self._lock:
+            service = self._ensure_service(service_id)
+            service["message_count"] += 1
+            service["registered"] = True
+            service["registered_at"] = now_ts
+            service["last_unregister"] = 0.0
+            service["metadata"] = payload
+
+            service["service_type"] = payload.get("service_type", payload.get("type", service["service_type"]))
+            service["module"] = payload.get("module", payload.get("type", service["module"]))
+            service["department"] = payload.get("department", payload.get("campus_unit", service["department"]))
+            service["version"] = payload.get("version", service["version"])
+
+            network = payload.get("network", {})
+            service["network"]["ip"] = network.get("ip", service["network"]["ip"])
+            service["network"]["port"] = network.get("port", service["network"]["port"])
+
+            service["last_heartbeat"] = now_ts
+            service["missed_checks"] = 0
+
+    def apply_unregister(self, service_id: str, now_ts: float) -> None:
+        with self._lock:
+            service = self._ensure_service(service_id)
+            service["message_count"] += 1
+            service["registered"] = False
+            service["last_unregister"] = now_ts
+
+    def apply_service_status(self, service_id: str, payload: dict) -> None:
+        with self._lock:
+            service = self._ensure_service(service_id)
+            service["message_count"] += 1
+            service["service_status"] = payload
 
     def apply_heartbeat(self, service_id: str, now_ts: float) -> None:
         with self._lock:
@@ -99,7 +151,7 @@ class StateStore:
             return [
                 service_id
                 for service_id, data in self._services.items()
-                if data.get("status") == "UP" and not data.get("pending_ping")
+                if data.get("status") == "UP" and data.get("registered") and not data.get("pending_ping")
             ]
 
     def mark_ping_sent(self, service_id: str, ping_id: str, sent_at: float) -> None:
